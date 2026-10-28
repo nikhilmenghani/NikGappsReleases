@@ -1,0 +1,133 @@
+name: Build stable release from source
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch, tag or commit
+        default: main
+        required: true
+      mirror_source:
+        description: Also publish to NikGapps during migration
+        type: boolean
+        default: true
+      version:
+        description: Stable version (major.minor), e.g. 0.81
+        required: true
+
+permissions:
+  contents: write
+concurrency:
+  group: public-stable-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGapps
+          ref: ${{ inputs.source_ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - name: Record source revision
+        run: echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'zulu'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Read requested stable version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || exit 1
+          IFS='.' read -r V_MAJOR V_MINOR <<< "$VERSION"
+          echo "TAG_VERSION=v$VERSION" >> "$GITHUB_ENV"
+          echo "PLAIN_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "V_MAJOR=$((10#$V_MAJOR))" >> "$GITHUB_ENV"
+          echo "V_MINOR=$((10#$V_MINOR))" >> "$GITHUB_ENV"
+
+      - name: Update Version in build.gradle.kts
+        run: |
+          sed -i "s/versionName = \".*\"/versionName = \"${{ env.PLAIN_VERSION }}\"/" app/build.gradle.kts
+          sed -i "s/versionCode = .*/versionCode = $(( ${{ env.V_MAJOR }} * 100 + ${{ env.V_MINOR }} ))/" app/build.gradle.kts
+
+      - name: Set Executable Permission for Gradlew
+        run: chmod +x ./gradlew
+
+      - name: Decode Keystore
+        run: echo "${{ secrets.KEYSTORE }}" | base64 -d > my-release-key.keystore
+
+      - name: Build and Sign APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          NIKGAPPS_CLIENT_ID: ${{ secrets.NIKGAPPS_CLIENT_ID }}
+        run: |
+          if [[ -z "$NIKGAPPS_CLIENT_ID" ]]; then
+            echo "NIKGAPPS_CLIENT_ID secret is required for GitHub sign-in."
+            exit 1
+          fi
+          ./gradlew assembleRelease --build-cache --parallel
+
+      - name: List APK directory
+        run: |
+          ls -lR app/build/outputs/apk/release
+
+      - name: Rename APK
+        run: |
+          mv app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/NikGapps-${{ env.TAG_VERSION }}.apk
+
+      - name: Publish public release
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: nikhilmenghani/NikGappsReleases
+          token: ${{ github.token }}
+          files: |
+            app/build/outputs/apk/release/NikGapps-${{ env.TAG_VERSION }}.apk
+            CHANGELOG.md
+          tag_name: ${{ env.TAG_VERSION }}
+          name: ${{ env.TAG_VERSION }}
+          prerelease: false
+          fail_on_unmatched_files: true
+
+      - name: Synchronize public changelog
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const owner = 'nikhilmenghani', repo = 'NikGappsReleases', path = 'CHANGELOG.md';
+            const content = fs.readFileSync(path).toString('base64');
+            let previous;
+            try { previous = (await github.rest.repos.getContent({owner, repo, path, ref: 'main'})).data; }
+            catch (error) { if (error.status !== 404) throw error; }
+            if (previous?.content?.replace(/\s/g, '') !== content) {
+              await github.rest.repos.createOrUpdateFileContents({owner, repo, path, branch: 'main',
+                message: 'Update public changelog', content, ...(previous ? {sha: previous.sha} : {})});
+            }
+
+      - name: Publish migration copy to source repository
+        if: inputs.mirror_source
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: nikhilmenghani/NikGapps
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          target_commitish: ${{ env.SOURCE_COMMIT }}
+          files: app/build/outputs/apk/release/NikGapps-${{ env.TAG_VERSION }}.apk
+          tag_name: ${{ env.TAG_VERSION }}
+          name: ${{ env.TAG_VERSION }}
+          prerelease: false
+          fail_on_unmatched_files: true
