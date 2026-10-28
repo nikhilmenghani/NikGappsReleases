@@ -1,36 +1,34 @@
 # NikGappsReleases
 
-Public Android app APK releases for [NikGapps](https://github.com/nikhilmenghani/NikGapps).
-This repository contains release automation and public changelogs, not the app source.
+Public Android app APK releases and changelogs for [NikGapps](https://github.com/nikhilmenghani/NikGapps).
 
-## Migration
+## Release process
 
-1. Add `AUTH` to **NikGapps** Actions secrets. It needs Contents read/write on **NikGappsReleases**.
-2. Commit the source app's migration changes before building the next release. Keep the source repository public during the transition.
-3. Increment `dev.txt` or `release.txt` as usual. The source workflow builds once and uploads the identical signed APK to both repositories. Do not also run the public workflow for that same release.
-4. Existing installations find the migration APK through NikGapps. Updated installations check NikGapps first, then this repository when NikGapps has no newer version or is unavailable.
-5. After sufficient migration releases, use the workflows here and turn off **mirror_source**. NikGapps can then become private; older clients without the migration update cannot discover releases here.
+This repository's `dev.txt` and `release.txt` are the only release version controls. The source repository contains app code and `CHANGELOG.md`, but no version files or release workflows.
 
-No version increment or release is triggered by the initial setup commit.
+1. Commit and push code and release notes to NikGapps.
+2. Include an exact heading such as `## 0.80.22` for development or `## 0.81` for stable, with at least one change beneath it.
+3. Increment the matching version file here on `main`. That file's value is the exact version to publish.
+4. The corresponding workflow clones the source, validates the changelog before building/signing, builds once, publishes the same signed APK to both repositories, and synchronizes the public changelog.
 
-## Build from this repository
+Missing, empty, placeholder-only, or duplicate matching changelog sections fail the build before publication. After fixing and pushing source notes, start a new manual run for the same public version; no extra version increment is needed.
 
-Update this repository's `dev.txt` (for example `0.80.21`) or `release.txt` (for example `0.81`) on `main` to publish that exact version. The corresponding workflow clones NikGapps `main`, even when private, builds once, and publishes the identical signed APK to both repositories. Do not update version files in both repos for the same release.
+You can also run either workflow manually and select a trusted source branch, tag, or commit. Manual runs read the same public version files. Disable `mirror_source` on a manual run to publish only here. Version-file pushes currently publish to both repositories.
 
-You can also manually run either workflow and choose a trusted source branch, tag or commit. Manual runs read these same public version files. Turn off `mirror_source` for a manual run when source publishing is no longer needed; push-triggered runs publish to both repos during the transition.
+Do not start multiple builds for the same version. The app prefers updates in NikGapps and falls back here when no newer source release is available or the source repository cannot be reached. Older clients without fallback support still need a source-repository migration release before that repository becomes private.
 
-Configure these Actions secrets here first:
+## Required Actions secrets
 
 | Secret | Purpose |
 | --- | --- |
-| `AUTH` | Contents read/write on both repositories, including access to private NikGapps |
+| `AUTH` | Token with Contents read/write on both repositories, including access to private NikGapps |
 | `KEYSTORE` | The exact existing signing keystore, base64 encoded |
-| `KEYSTORE_PASSWORD` | The existing keystore/key password |
-| `NIKGAPPS_CLIENT_ID` | Existing GitHub sign-in client ID |
-| `POSTHOG_API_KEY`, `POSTHOG_HOST` | Existing analytics configuration |
+| `KEYSTORE_PASSWORD` | Existing signing keystore/key password |
+| `NIKGAPPS_CLIENT_ID` | GitHub sign-in client ID |
+| `POSTHOG_API_KEY`, `POSTHOG_HOST` | Analytics configuration |
 
-Private source checkout and publishing to both repositories use `AUTH`. Configure AUTH here separately; source secrets are not shared automatically. Preserve the original signing key, application IDs, filenames, tags, and monotonically increasing version codes so installed apps accept updates. Source-repository secrets are not inherited here. Supply secrets through GitHub Settings, never committed files.
+Configure secrets here separately; source repository secrets are not shared automatically. Private source checkout, publication and changelog synchronization use `AUTH`.
 
-Version-file pushes on main and manual dispatch are enabled here. Public pull requests never run the private checkout or receive release secrets. A release can expose the APK and CHANGELOG.md publicly even when its source is private; run only trusted source revisions.
+Preserve signing keys, application IDs and artifact names; increase version codes with each release so installed apps accept updates. Development versions use `major.minor.patch`; stable versions use `major.minor`, retaining the existing code schemes.
 
-The app changelog is also maintained here for access after the source repository becomes private. Release workflows synchronize it after publication. Test the first dual-published release and in-app download on both channels before changing visibility.
+Only version-file pushes to `main` and manual dispatch build releases. Public pull requests do not run the private checkout or receive release credentials. Publishing makes the APK and changelog public, not the source files.
