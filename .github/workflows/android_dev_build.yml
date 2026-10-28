@@ -1,6 +1,9 @@
 name: Build development release from source
 
 on:
+  push:
+    branches: [main]
+    paths: ['dev.txt']
   workflow_dispatch:
     inputs:
       source_ref:
@@ -23,12 +26,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout release controls
+        uses: actions/checkout@v4
+        with:
+          path: release-control
+          persist-credentials: false
+
+      - name: Read public release version
+        shell: bash
+        run: |
+          VERSION="$(tr -d '[:space:]' < release-control/dev.txt)"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid release version"; exit 1; }
+          echo "PUBLIC_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: nikhilmenghani/NikGapps
-          ref: ${{ inputs.source_ref }}
-          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          ref: ${{ inputs.source_ref || 'main' }}
+          token: ${{ secrets.AUTH }}
           persist-credentials: false
 
       - name: Record source revision
@@ -46,7 +62,7 @@ jobs:
       - name: Read development version
         shell: bash
         run: |
-          DEV_VERSION="$(tr -d '[:space:]' < dev.txt)"
+          DEV_VERSION="$PUBLIC_RELEASE_VERSION"
           if [[ ! "$DEV_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "dev.txt must contain a semantic version such as 0.80.1"
             exit 1
@@ -114,7 +130,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           repository: nikhilmenghani/NikGappsReleases
-          token: ${{ github.token }}
+          token: ${{ secrets.AUTH }}
           files: |
             app/build/outputs/apk/debug/NikGapps-debug-${{ env.DEV_TAG }}.apk
             CHANGELOG.md
@@ -126,7 +142,7 @@ jobs:
       - name: Synchronize public changelog
         uses: actions/github-script@v7
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.AUTH }}
           script: |
             const fs = require('fs');
             const owner = 'nikhilmenghani', repo = 'NikGappsReleases', path = 'CHANGELOG.md';
@@ -140,11 +156,11 @@ jobs:
             }
 
       - name: Publish migration copy to source repository
-        if: inputs.mirror_source
+        if: github.event_name == 'push' || inputs.mirror_source
         uses: softprops/action-gh-release@v2
         with:
           repository: nikhilmenghani/NikGapps
-          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          token: ${{ secrets.AUTH }}
           target_commitish: ${{ env.SOURCE_COMMIT }}
           files: app/build/outputs/apk/debug/NikGapps-debug-${{ env.DEV_TAG }}.apk
           tag_name: ${{ env.DEV_TAG }}
