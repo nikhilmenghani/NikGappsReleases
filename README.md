@@ -13,7 +13,11 @@ This repository's `dev.txt` and `release.txt` are the only release version contr
 
 Missing, empty, placeholder-only, or duplicate matching changelog sections fail the build before publication. After fixing and pushing source notes, start a new manual run for the same public version; no extra version increment is needed.
 
-You can also run either workflow manually and select a trusted source branch, tag, or commit. Manual runs read the same public version files. Disable `mirror_source` on a manual run to publish only here. Version-file pushes currently publish to both repositories.
+You can also run either workflow manually and select a trusted source branch, tag, or commit. Manual runs read the same public version files. Both manual runs and version-file pushes publish the same APK to **NikGappsReleases and NikGapps**, replacing existing assets with matching names. If either publication fails, the workflow fails; run a new manual build after resolving the failure to synchronize both copies.
+
+To replace an existing development APK without changing its version, start a **new manual run** of `Build development release from source` using workflow branch `main`, keep `dev.txt` at that version, and set `source_ref` to the original source tag or commit (for example, `dev-v0.80.21`). This uses the current workflow/signing checks with the original app source. Re-running an older workflow run uses that run's workflow revision and may omit later fixes. Replacing an APK at the same version does not notify users who already have that version installed; increment the version when a new update notification is needed.
+
+NikGappsReleases checks out the NikGapps source and builds it directly; it does not dispatch another release workflow in NikGapps. Publishing the migration copy there does not perform a second build. No source-repository release workflow or source version file is required for this flow.
 
 Do not start multiple builds for the same version. The app prefers updates in NikGapps and falls back here when no newer source release is available or the source repository cannot be reached. Older clients without fallback support still need a source-repository migration release before that repository becomes private.
 

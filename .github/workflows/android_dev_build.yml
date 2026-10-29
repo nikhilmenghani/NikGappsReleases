@@ -10,10 +10,6 @@ on:
         description: Source branch, tag or commit
         default: main
         required: true
-      mirror_source:
-        description: Also publish to NikGapps during migration
-        type: boolean
-        default: true
 
 permissions:
   contents: write
@@ -161,6 +157,7 @@ jobs:
           name: ${{ env.DEV_VERSION }}
           prerelease: true
           fail_on_unmatched_files: true
+          overwrite_files: true
 
       - name: Remove temporary signing key
         if: always()
@@ -183,7 +180,6 @@ jobs:
             }
 
       - name: Publish migration copy to source repository
-        if: github.event_name == 'push' || inputs.mirror_source
         uses: softprops/action-gh-release@v2
         with:
           repository: nikhilmenghani/NikGapps
@@ -194,3 +190,4 @@ jobs:
           name: ${{ env.DEV_VERSION }}
           prerelease: true
           fail_on_unmatched_files: true
+          overwrite_files: true
