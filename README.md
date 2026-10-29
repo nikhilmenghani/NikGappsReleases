@@ -32,3 +32,13 @@ Configure secrets here separately; source repository secrets are not shared auto
 Preserve signing keys, application IDs and artifact names; increase version codes with each release so installed apps accept updates. Development versions use `major.minor.patch`; stable versions use `major.minor`, retaining the existing code schemes.
 
 Only version-file pushes to `main` and manual dispatch build releases. Public pull requests do not run the private checkout or receive release credentials. Publishing makes the APK and changelog public, not the source files.
+
+## Development APK signing
+
+After Gradle builds the development APK, the workflow re-signs it with Android Build Tools 36.1.0 and the existing release key before publishing. It verifies the pinned release certificate, v2 signature, every APK entry and the compressed entry bytes. Code, permissions, package/version information and in-app updates must remain unchanged. Verification failures stop publication; both repositories receive the same verified output.
+
+This follows the signing procedure tested on OnePlus with the published 0.80.21 APK. The original was blocked by Play Protect; the re-signed APK passed and updated the existing app while retaining its files and preferences. It does not identify Google's internal classification reason or guarantee future scan results. Play Protect remains enabled; no warnings are bypassed. Stable release signing is unchanged.
+
+The signing helper takes passwords through environment variables, leaves the original Gradle APK intact, and records public certificate and APK hashes in the job log. The temporary decoded keystore is removed even if a later step fails. The expected certificate fingerprint is public signing identity, not a credential; changing it requires an intentional signing-key migration.
+
+Run the release-helper checks locally with `python3 -m unittest discover -s .github/scripts -p 'test_*.py'`.
