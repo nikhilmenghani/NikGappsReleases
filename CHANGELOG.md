@@ -1,5 +1,11 @@
 # NikGapps changelog
 
+## 0.80.22
+- Add screen-specific help and remembered guide progress.
+- Improve UI for AppSet and package selection, with a grouped review before building ZIPs.
+- Improve navigation, bottom search controls, app icons and button layouts.
+- Show app icons for the apps installed on your device
+
 ## 0.80.21
 - Bundle project-specific debloating with standard commented configs in build ZIPs.
 - Choose compact radial or classic list project menus in Settings.
