@@ -49,9 +49,6 @@ jobs:
       - name: Validate source changelog
         run: python3 "$RUNNER_TEMP/validate_changelog.py" "$PUBLIC_RELEASE_VERSION" CHANGELOG.md
 
-      - name: Record source revision
-        run: echo "SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-
       - name: Set up JDK 21
         uses: actions/setup-java@v5
         with:
@@ -178,16 +175,3 @@ jobs:
               await github.rest.repos.createOrUpdateFileContents({owner, repo, path, branch: 'main',
                 message: 'Update public changelog', content, ...(previous ? {sha: previous.sha} : {})});
             }
-
-      - name: Publish migration copy to source repository
-        uses: softprops/action-gh-release@v2
-        with:
-          repository: nikhilmenghani/NikGapps
-          token: ${{ secrets.AUTH }}
-          target_commitish: ${{ env.SOURCE_COMMIT }}
-          files: app/build/outputs/apk/debug/NikGapps-debug-${{ env.DEV_TAG }}.apk
-          tag_name: ${{ env.DEV_TAG }}
-          name: ${{ env.DEV_VERSION }}
-          prerelease: true
-          fail_on_unmatched_files: true
-          overwrite_files: true
