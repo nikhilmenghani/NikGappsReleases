@@ -58,6 +58,11 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
+      - name: Verify app before building a release
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease --no-daemon
+
       - name: Read development version
         shell: bash
         run: |
