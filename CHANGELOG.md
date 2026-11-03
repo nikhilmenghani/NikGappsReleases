@@ -2,9 +2,10 @@
 
 ## 0.80.22
 - Add screen-specific help and remembered guide progress.
-- Improve UI for AppSet and package selection, with a grouped review before building ZIPs.
-- Improve navigation, bottom search controls, app icons and button layouts.
-- Show app icons for the apps installed on your device
+- Unify AppSets and packages with animated groups and a full-screen review of packages and debloater targets.
+- Show consistent app icons in package lists and details, using device or registry icons with offline caching and standard fallbacks.
+- Refine package details and show installed-size estimates, including dependencies and partition totals before flashing.
+- Improve navigation, bottom search controls and button layouts.
 
 ## 0.80.21
 - Bundle project-specific debloating with standard commented configs in build ZIPs.
