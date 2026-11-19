@@ -3,13 +3,12 @@ name: Build stable release from source
 on:
   push:
     branches: [main]
-    paths: ['release.txt', 'source.txt']
+    paths: ['release.txt', 'stable-source.txt']
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Source branch, tag or commit
-        default: main
-        required: true
+        description: Optional source branch, tag or commit override
+        required: false
 
 permissions:
   contents: write
@@ -34,8 +33,8 @@ jobs:
           VERSION="$(tr -d '[:space:]' < release-control/release.txt)"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "Invalid release version"; exit 1; }
           echo "PUBLIC_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          SOURCE_REF="$(tr -d '[:space:]' < release-control/source.txt)"
-          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "source.txt must contain a full source commit SHA"; exit 1; }
+          SOURCE_REF="$(tr -d '[:space:]' < release-control/stable-source.txt)"
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "stable-source.txt must contain a full source commit SHA"; exit 1; }
           echo "RELEASE_SOURCE_REF=$SOURCE_REF" >> "$GITHUB_ENV"
           python3 -m unittest discover -s release-control/.github/scripts -p 'test_*.py'
           cp release-control/.github/scripts/validate_changelog.py "$RUNNER_TEMP/validate_changelog.py"
