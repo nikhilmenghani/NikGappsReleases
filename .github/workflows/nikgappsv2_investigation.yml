@@ -16,7 +16,7 @@ permissions:
   contents: read
 jobs:
   release:
-    uses: nikhilmenghani/NikGappsv2/.github/workflows/release.yml@7db1d9350876f74e3dca7d42c57d0c073ee05fc9
+    uses: nikhilmenghani/NikGappsv2/.github/workflows/release.yml@c40030148eb0a6608ea0fde3c0acc833b6bad4a7
     with:
       source_ref: ${{ inputs.source_ref }}
       tag: ${{ inputs.tag }}
