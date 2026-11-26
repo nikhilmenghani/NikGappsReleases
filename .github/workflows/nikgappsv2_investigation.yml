@@ -1,0 +1,27 @@
+name: NikGappsv2 investigation
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full NikGappsv2 source commit
+        required: true
+      tag:
+        description: Immutable experimental tag
+        required: true
+      signing:
+        type: choice
+        options: [normalized, ordinary]
+        default: normalized
+permissions:
+  contents: read
+jobs:
+  release:
+    uses: nikhilmenghani/NikGappsv2/.github/workflows/release.yml@d4e56295b88ade4c4a72b8770251e10db8892958
+    with:
+      source_ref: ${{ inputs.source_ref }}
+      tag: ${{ inputs.tag }}
+      signing: ${{ inputs.signing }}
+    secrets:
+      KEYSTORE: ${{ secrets.KEYSTORE }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      PUBLISH_TOKEN: ${{ secrets.AUTH }}
