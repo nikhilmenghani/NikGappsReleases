@@ -12,15 +12,20 @@ on:
         type: choice
         options: [normalized, ordinary]
         default: normalized
+      fixtures:
+        description: Include separate internal component test artifact
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   release:
-    uses: nikhilmenghani/NikGappsv2/.github/workflows/release.yml@c40030148eb0a6608ea0fde3c0acc833b6bad4a7
+    uses: nikhilmenghani/NikGappsv2/.github/workflows/release.yml@7ef32119c088ecb2b5821d39a526ea7576e944aa
     with:
       source_ref: ${{ inputs.source_ref }}
       tag: ${{ inputs.tag }}
       signing: ${{ inputs.signing }}
+      fixtures: ${{ inputs.fixtures }}
     secrets:
       KEYSTORE: ${{ secrets.KEYSTORE }}
       KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
