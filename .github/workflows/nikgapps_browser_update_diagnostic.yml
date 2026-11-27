@@ -46,8 +46,8 @@ jobs:
               assert name.startswith('app/src/') and '..' not in Path(name).parts
               data=(root/'source'/name).read_bytes();assert hashlib.sha256(data).hexdigest()==digest
               p=Path(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
-          p=Path('app/src/androidTest/java/com/nikgapps/browsercheck/BrowserUpdateInstrumentation.kt');p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes((root/'BrowserUpdateInstrumentation.kt').read_bytes())
-          p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"').replace('    compileSdk = 37','    compileSdk = 37\n    testBuildType = "release"').replace('androidx.test.runner.AndroidJUnitRunner','com.nikgapps.browsercheck.BrowserUpdateInstrumentation');p.write_text(s)
+          p=Path('app/src/browserCheckTest/java/com/nikgapps/browsercheck/BrowserUpdateInstrumentation.kt');p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes((root/'BrowserUpdateInstrumentation.kt').read_bytes())
+          p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"').replace('    compileSdk = 37','    compileSdk = 37\n    testBuildType = "release"\n    sourceSets.getByName("androidTest").java.setSrcDirs(listOf("src/browserCheckTest/java"))\n    sourceSets.getByName("androidTest").kotlin.setSrcDirs(listOf("src/browserCheckTest/java"))').replace('androidx.test.runner.AndroidJUnitRunner','com.nikgapps.browsercheck.BrowserUpdateInstrumentation');s="\n".join(line for line in s.splitlines() if "androidTestImplementation(" not in line)+"\n";p.write_text(s)
           PY
           mkdir ../evidence
           git add -N app/src/
@@ -73,7 +73,7 @@ jobs:
           POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
           NIKGAPPS_CLIENT_ID: ${{ secrets.NIKGAPPS_CLIENT_ID }}
         run: |
-          ./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease :app:assembleReleaseAndroidTest --console=plain
+          ./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease :app:assembleReleaseAndroidTest --max-workers=2 --no-parallel -Dorg.gradle.jvmargs="-Xmx3072m -Dfile.encoding=UTF-8" --console=plain
           ./gradlew :app:dependencies --configuration releaseRuntimeClasspath > ../evidence/dependencies.txt
       - name: Normalize and verify original APK
         working-directory: source
