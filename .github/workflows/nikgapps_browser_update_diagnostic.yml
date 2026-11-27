@@ -1,0 +1,129 @@
+name: Original NikGapps browser update diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: original-browser-update-diagnostic
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGappsReleases
+          ref: a68f1c64fe31c2483f1144ef87152b24fd9e7aab
+          path: controls
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGapps
+          ref: 959f3f4f7561a1647c8432133b3243069991c34e
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: zulu
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGappsv2
+          ref: e97637581aacd68dea5150bfbd3e418460873438
+          path: overlay
+          persist-credentials: false
+      - name: Apply reviewed updater overlay and separate test runner
+        working-directory: source
+        run: |
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          root=Path('../overlay/investigation/browser-update')
+          manifest=json.loads((root/'overlay.json').read_text())
+          assert manifest['base_original_source']=='959f3f4f7561a1647c8432133b3243069991c34e'
+          for name,digest in manifest['files'].items():
+              assert name.startswith('app/src/') and '..' not in Path(name).parts
+              data=(root/'source'/name).read_bytes();assert hashlib.sha256(data).hexdigest()==digest
+              p=Path(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+          p=Path('app/src/androidTest/java/com/nikgapps/browsercheck/BrowserUpdateInstrumentation.kt');p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes((root/'BrowserUpdateInstrumentation.kt').read_bytes())
+          p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"').replace('    compileSdk = 37','    compileSdk = 37\n    testBuildType = "release"').replace('androidx.test.runner.AndroidJUnitRunner','com.nikgapps.browsercheck.BrowserUpdateInstrumentation');p.write_text(s)
+          PY
+          mkdir ../evidence
+          git diff > ../evidence/build.patch
+          git rev-parse HEAD > ../evidence/original-source-commit.txt
+          cp ../overlay/investigation/browser-update/overlay.json ../evidence/
+          chmod +x gradlew
+      - name: Prepare production signing
+        working-directory: source
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          python3 - <<'PY'
+          import base64,os
+          from pathlib import Path
+          Path('my-release-key.keystore').write_bytes(base64.b64decode(os.environ['KEYSTORE']))
+          PY
+      - name: Verify and build original release
+        working-directory: source
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          NIKGAPPS_CLIENT_ID: ${{ secrets.NIKGAPPS_CLIENT_ID }}
+        run: |
+          ./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease :app:assembleReleaseAndroidTest --console=plain
+          ./gradlew :app:dependencies --configuration releaseRuntimeClasspath > ../evidence/dependencies.txt
+      - name: Normalize and verify original APK
+        working-directory: source
+        env:
+          APK_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          APK_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          VARIANT: browser
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.1.0'
+          alias=$(keytool -list -v -keystore my-release-key.keystore -storepass:env APK_STORE_PASSWORD | sed -n 's/^Alias name: //p' | head -n 1)
+          python3 ../controls/.github/scripts/normalize_apk_signing.py --input app/build/outputs/apk/release/app-release.apk --output ../evidence/NikGapps-browser.apk --keystore my-release-key.keystore --alias "$alias" --apksigner "$ANDROID_HOME/build-tools/36.1.0/apksigner" --expected-certificate cca3e6aed9650ae8529bb90c845cd7f77dce41e59f5d81e3b9555adb0984caf7 --report ../evidence/signing-verification.json
+          cp app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml ../evidence/AndroidManifest.xml
+          python3 - <<'PY'
+          import os,xml.etree.ElementTree as E
+          r=E.parse('../evidence/AndroidManifest.xml').getroot();ns='{http://schemas.android.com/apk/res/android}'
+          assert r.get('package')=='com.nikgapps' and r.get(ns+'versionCode')=='82'
+          assert r.find('application').get(ns+'debuggable')!='true'
+          present=any(n.get(ns+'name')=='android.permission.REQUEST_INSTALL_PACKAGES' for n in r.findall('uses-permission'))
+          assert not present
+          assert r.find('instrumentation') is None
+          PY
+          "$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs ../evidence/NikGapps-browser.apk > ../evidence/certificate.txt
+          (cd ../evidence && sha256sum *.apk > SHA256SUMS)
+      - name: Sign separate temporary UI test tool
+        working-directory: source
+        env:
+          APK_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          APK_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          alias=$(keytool -list -v -keystore my-release-key.keystore -storepass:env APK_STORE_PASSWORD | sed -n 's/^Alias name: //p' | head -n 1)
+          mkdir "$RUNNER_TEMP/browser-fixtures"
+          python3 ../controls/.github/scripts/normalize_apk_signing.py --input app/build/outputs/apk/androidTest/release/app-release-androidTest.apk --output "$RUNNER_TEMP/browser-fixtures/BrowserFixtures.apk" --keystore my-release-key.keystore --alias "$alias" --apksigner "$ANDROID_HOME/build-tools/36.1.0/apksigner" --expected-certificate cca3e6aed9650ae8529bb90c845cd7f77dce41e59f5d81e3b9555adb0984caf7 --report "$RUNNER_TEMP/browser-fixtures/signing-verification.json"
+          cp app/build/intermediates/packaged_manifests/releaseAndroidTest/processReleaseAndroidTestManifest/AndroidManifest.xml "$RUNNER_TEMP/browser-fixtures/AndroidManifest.xml"
+          cp ../evidence/original-source-commit.txt "$RUNNER_TEMP/browser-fixtures/"
+          echo e97637581aacd68dea5150bfbd3e418460873438 > "$RUNNER_TEMP/browser-fixtures/overlay-commit.txt"
+          (cd "$RUNNER_TEMP/browser-fixtures" && sha256sum BrowserFixtures.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-browser-update-fixtures-001
+          path: ${{ runner.temp }}/browser-fixtures/*
+          retention-days: 1
+      - name: Publish diagnostic prerelease only
+        env:
+          GH_TOKEN: ${{ secrets.AUTH }}
+          GH_REPO: nikhilmenghani/NikGappsv2
+        run: |
+          tag=original-browser-update-001
+          if gh release view "$tag" >/dev/null 2>&1; then exit 1; fi
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then exit 1; fi
+          echo 'Original com.nikgapps browser-update diagnostic. Original source 959f3f4f7561a1647c8432133b3243069991c34e plus SHA-verified updater overlay e97637581aacd68dea5150bfbd3e418460873438. Production signing, version 0.82/code82; no install permission. Separate test tool is not included in this APK. Not a stable release; device checks pending.' > evidence/NOTES.md
+          gh release create "$tag" evidence/* --target e97637581aacd68dea5150bfbd3e418460873438 --prerelease --title 'Original NikGapps: browser update handoff' --notes-file evidence/NOTES.md
+      - name: Clean signing material
+        if: always()
+        run: rm -f source/my-release-key.keystore
