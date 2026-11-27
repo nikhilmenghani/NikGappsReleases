@@ -1,0 +1,110 @@
+name: Original NikGapps permission diagnostic
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        type: choice
+        options: [removed, present]
+        default: removed
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: original-permission-diagnostic
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGappsReleases
+          ref: a68f1c64fe31c2483f1144ef87152b24fd9e7aab
+          path: controls
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGapps
+          ref: 43efaa19392185ce2bb023a6765f68d21ffa1772
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: zulu
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Apply isolated manifest change and matched release version
+        working-directory: source
+        env:
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          variant=os.environ['VARIANT'];assert variant in ('removed','present')
+          p=Path('app/src/main/AndroidManifest.xml');s=p.read_text()
+          line='    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n'
+          assert s.count(line)==1
+          if variant=='removed':p.write_text(s.replace(line,''))
+          p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"');p.write_text(s)
+          PY
+          mkdir ../evidence
+          git diff -- app/src/main/AndroidManifest.xml app/build.gradle.kts > ../evidence/build.patch
+          git rev-parse HEAD > ../evidence/original-source-commit.txt
+          chmod +x gradlew
+      - name: Prepare production signing
+        working-directory: source
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          python3 - <<'PY'
+          import base64,os
+          from pathlib import Path
+          Path('my-release-key.keystore').write_bytes(base64.b64decode(os.environ['KEYSTORE']))
+          PY
+      - name: Verify and build original release
+        working-directory: source
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          NIKGAPPS_CLIENT_ID: ${{ secrets.NIKGAPPS_CLIENT_ID }}
+        run: |
+          ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --console=plain
+          ./gradlew :app:dependencies --configuration releaseRuntimeClasspath > ../evidence/dependencies.txt
+      - name: Normalize and verify original APK
+        working-directory: source
+        env:
+          APK_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          APK_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.1.0'
+          alias=$(keytool -list -v -keystore my-release-key.keystore -storepass:env APK_STORE_PASSWORD | sed -n 's/^Alias name: //p' | head -n 1)
+          python3 ../controls/.github/scripts/normalize_apk_signing.py --input app/build/outputs/apk/release/app-release.apk --output ../evidence/NikGapps-v0.82-permission-$VARIANT.apk --keystore my-release-key.keystore --alias "$alias" --apksigner "$ANDROID_HOME/build-tools/36.1.0/apksigner" --expected-certificate cca3e6aed9650ae8529bb90c845cd7f77dce41e59f5d81e3b9555adb0984caf7 --report ../evidence/signing-verification.json
+          cp app/build/intermediates/merged_manifests/release/processReleaseManifest/AndroidManifest.xml ../evidence/AndroidManifest.xml
+          python3 - <<'PY'
+          import os,xml.etree.ElementTree as E
+          r=E.parse('../evidence/AndroidManifest.xml').getroot();ns='{http://schemas.android.com/apk/res/android}'
+          assert r.get('package')=='com.nikgapps' and r.get(ns+'versionCode')=='82'
+          assert r.find('application').get(ns+'debuggable')!='true'
+          present=any(n.get(ns+'name')=='android.permission.REQUEST_INSTALL_PACKAGES' for n in r.findall('uses-permission'))
+          assert present==(os.environ['VARIANT']=='present')
+          assert r.find('instrumentation') is None
+          PY
+          "$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs ../evidence/NikGapps-v0.82-permission-$VARIANT.apk > ../evidence/certificate.txt
+          (cd ../evidence && sha256sum *.apk > SHA256SUMS)
+      - name: Publish diagnostic prerelease only
+        env:
+          GH_TOKEN: ${{ secrets.AUTH }}
+          GH_REPO: nikhilmenghani/NikGappsv2
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          tag="original082-permission-$VARIANT"
+          if gh release view "$tag" >/dev/null 2>&1; then exit 1; fi
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then exit 1; fi
+          echo 'Diagnostic ORIGINAL com.nikgapps v0.82; production signing; manifest install-permission comparison. Not a public stable update. Source 43efaa19392185ce2bb023a6765f68d21ffa1772; exact build.patch attached. Device results pending. Earlier versions may require normal upgrade; do not bypass Play Protect.' > evidence/NOTES.md
+          gh release create "$tag" evidence/* --target 2eed2e84d5daf311802b13a4438e7108316b938f --prerelease --title "Original NikGapps 0.82: install permission $VARIANT" --notes-file evidence/NOTES.md
+      - name: Clean signing material
+        if: always()
+        run: rm -f source/my-release-key.keystore
