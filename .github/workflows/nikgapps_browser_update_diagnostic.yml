@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nikhilmenghani/NikGapps
-          ref: 959f3f4f7561a1647c8432133b3243069991c34e
+          ref: 4ae37fca0f2266ee89a87e0a1aad62ad92dae050
           path: source
           persist-credentials: false
       - uses: actions/setup-java@v5
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: nikhilmenghani/NikGappsv2
-          ref: e97637581aacd68dea5150bfbd3e418460873438
+          ref: a7b160d51c516a9d31ed88ebf7dd0e788fefa1bf
           path: overlay
           persist-credentials: false
       - name: Apply reviewed updater overlay and separate test runner
@@ -41,7 +41,7 @@ jobs:
           from pathlib import Path
           root=Path('../overlay/investigation/browser-update')
           manifest=json.loads((root/'overlay.json').read_text())
-          assert manifest['base_original_source']=='959f3f4f7561a1647c8432133b3243069991c34e'
+          assert manifest['base_original_source']=='4ae37fca0f2266ee89a87e0a1aad62ad92dae050'
           for name,digest in manifest['files'].items():
               assert name.startswith('app/src/') and '..' not in Path(name).parts
               data=(root/'source'/name).read_bytes();assert hashlib.sha256(data).hexdigest()==digest
@@ -50,6 +50,7 @@ jobs:
           p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"').replace('    compileSdk = 37','    compileSdk = 37\n    testBuildType = "release"').replace('androidx.test.runner.AndroidJUnitRunner','com.nikgapps.browsercheck.BrowserUpdateInstrumentation');p.write_text(s)
           PY
           mkdir ../evidence
+          git add -N app/src/
           git diff > ../evidence/build.patch
           git rev-parse HEAD > ../evidence/original-source-commit.txt
           cp ../overlay/investigation/browser-update/overlay.json ../evidence/
@@ -107,7 +108,7 @@ jobs:
           python3 ../controls/.github/scripts/normalize_apk_signing.py --input app/build/outputs/apk/androidTest/release/app-release-androidTest.apk --output "$RUNNER_TEMP/browser-fixtures/BrowserFixtures.apk" --keystore my-release-key.keystore --alias "$alias" --apksigner "$ANDROID_HOME/build-tools/36.1.0/apksigner" --expected-certificate cca3e6aed9650ae8529bb90c845cd7f77dce41e59f5d81e3b9555adb0984caf7 --report "$RUNNER_TEMP/browser-fixtures/signing-verification.json"
           cp app/build/intermediates/packaged_manifests/releaseAndroidTest/processReleaseAndroidTestManifest/AndroidManifest.xml "$RUNNER_TEMP/browser-fixtures/AndroidManifest.xml"
           cp ../evidence/original-source-commit.txt "$RUNNER_TEMP/browser-fixtures/"
-          echo e97637581aacd68dea5150bfbd3e418460873438 > "$RUNNER_TEMP/browser-fixtures/overlay-commit.txt"
+          echo a7b160d51c516a9d31ed88ebf7dd0e788fefa1bf > "$RUNNER_TEMP/browser-fixtures/overlay-commit.txt"
           (cd "$RUNNER_TEMP/browser-fixtures" && sha256sum BrowserFixtures.apk > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
@@ -122,8 +123,8 @@ jobs:
           tag=original-browser-update-001
           if gh release view "$tag" >/dev/null 2>&1; then exit 1; fi
           if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then exit 1; fi
-          echo 'Original com.nikgapps browser-update diagnostic. Original source 959f3f4f7561a1647c8432133b3243069991c34e plus SHA-verified updater overlay e97637581aacd68dea5150bfbd3e418460873438. Production signing, version 0.82/code82; no install permission. Separate test tool is not included in this APK. Not a stable release; device checks pending.' > evidence/NOTES.md
-          gh release create "$tag" evidence/* --target e97637581aacd68dea5150bfbd3e418460873438 --prerelease --title 'Original NikGapps: browser update handoff' --notes-file evidence/NOTES.md
+          echo 'Original com.nikgapps browser-update diagnostic. Original source 4ae37fca0f2266ee89a87e0a1aad62ad92dae050 plus SHA-verified updater overlay a7b160d51c516a9d31ed88ebf7dd0e788fefa1bf. Production signing, version 0.82/code82; no install permission. Separate test tool is not included in this APK. Not a stable release; device checks pending.' > evidence/NOTES.md
+          gh release create "$tag" evidence/* --target a7b160d51c516a9d31ed88ebf7dd0e788fefa1bf --prerelease --title 'Original NikGapps: browser update handoff' --notes-file evidence/NOTES.md
       - name: Clean signing material
         if: always()
         run: rm -f source/my-release-key.keystore
