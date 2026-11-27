@@ -55,9 +55,10 @@ jobs:
           git rev-parse HEAD > ../evidence/original-source-commit.txt
           cp ../overlay/investigation/browser-update/overlay.json ../evidence/
           chmod +x gradlew
+          sed -i '1i import java.time.Duration' app/build.gradle.kts
           cat >> app/build.gradle.kts <<'KOTLIN'
           tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
-              timeout.set(java.time.Duration.ofMinutes(3))
+              timeout.set(Duration.ofMinutes(3))
               testLogging { events("started", "passed", "skipped", "failed") }
           }
           KOTLIN
