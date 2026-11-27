@@ -1,0 +1,106 @@
+name: Browser update UI runner only
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: browser-update-fixture-only
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGappsReleases
+          ref: a68f1c64fe31c2483f1144ef87152b24fd9e7aab
+          path: controls
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGapps
+          ref: 4ae37fca0f2266ee89a87e0a1aad62ad92dae050
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: zulu
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: actions/checkout@v4
+        with:
+          repository: nikhilmenghani/NikGappsv2
+          ref: b8fec22296fdda6c3ef3ffa1fc85635cbcf4cf22
+          path: overlay
+          persist-credentials: false
+      - name: Apply reviewed updater overlay and separate test runner
+        working-directory: source
+        run: |
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          root=Path('../overlay/investigation/browser-update')
+          manifest=json.loads((root/'overlay.json').read_text())
+          assert manifest['base_original_source']=='4ae37fca0f2266ee89a87e0a1aad62ad92dae050'
+          for name,digest in manifest['files'].items():
+              assert name.startswith('app/src/') and '..' not in Path(name).parts
+              data=(root/'source'/name).read_bytes();assert hashlib.sha256(data).hexdigest()==digest
+              p=Path(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+          p=Path('app/src/browserCheckTest/java/com/nikgapps/browsercheck/BrowserUpdateInstrumentation.kt');p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes((root/'BrowserUpdateInstrumentation.kt').read_bytes())
+          p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"').replace('    compileSdk = 37','    compileSdk = 37\n    testBuildType = "release"\n    sourceSets.getByName("androidTest").java.setSrcDirs(listOf("src/browserCheckTest/java"))\n    sourceSets.getByName("androidTest").kotlin.setSrcDirs(listOf("src/browserCheckTest/java"))').replace('androidx.test.runner.AndroidJUnitRunner','com.nikgapps.browsercheck.BrowserUpdateInstrumentation');s="\n".join(line for line in s.splitlines() if "androidTestImplementation(" not in line)+"\n";p.write_text(s)
+          PY
+          mkdir ../evidence
+          git add -N app/src/
+          git diff > ../evidence/build.patch
+          git rev-parse HEAD > ../evidence/original-source-commit.txt
+          cp ../overlay/investigation/browser-update/overlay.json ../evidence/
+          chmod +x gradlew
+          sed -i '1i import java.time.Duration' app/build.gradle.kts
+          cat >> app/build.gradle.kts <<'KOTLIN'
+          tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+              timeout.set(Duration.ofMinutes(3))
+              testLogging { events("started", "passed", "skipped", "failed") }
+          }
+          KOTLIN
+      - name: Prepare production signing
+        working-directory: source
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          python3 - <<'PY'
+          import base64,os
+          from pathlib import Path
+          Path('my-release-key.keystore').write_bytes(base64.b64decode(os.environ['KEYSTORE']))
+          PY
+      - name: Build only separate UI runner
+        working-directory: source
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
+          NIKGAPPS_CLIENT_ID: ${{ secrets.NIKGAPPS_CLIENT_ID }}
+        run: |
+          ./gradlew :app:assembleReleaseAndroidTest --max-workers=2 --no-parallel -Dorg.gradle.jvmargs="-Xmx3072m -Dfile.encoding=UTF-8" --console=plain
+      - name: Sign separate temporary UI test tool
+        working-directory: source
+        env:
+          APK_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          APK_KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.1.0'
+          alias=$(keytool -list -v -keystore my-release-key.keystore -storepass:env APK_STORE_PASSWORD | sed -n 's/^Alias name: //p' | head -n 1)
+          mkdir "$RUNNER_TEMP/browser-fixtures"
+          python3 ../controls/.github/scripts/normalize_apk_signing.py --input app/build/outputs/apk/androidTest/release/app-release-androidTest.apk --output "$RUNNER_TEMP/browser-fixtures/BrowserFixtures.apk" --keystore my-release-key.keystore --alias "$alias" --apksigner "$ANDROID_HOME/build-tools/36.1.0/apksigner" --expected-certificate cca3e6aed9650ae8529bb90c845cd7f77dce41e59f5d81e3b9555adb0984caf7 --report "$RUNNER_TEMP/browser-fixtures/signing-verification.json"
+          cp app/build/intermediates/packaged_manifests/releaseAndroidTest/processReleaseAndroidTestManifest/AndroidManifest.xml "$RUNNER_TEMP/browser-fixtures/AndroidManifest.xml"
+          cp ../evidence/original-source-commit.txt "$RUNNER_TEMP/browser-fixtures/"
+          echo a7b160d51c516a9d31ed88ebf7dd0e788fefa1bf > "$RUNNER_TEMP/browser-fixtures/overlay-commit.txt"
+          echo b8fec22296fdda6c3ef3ffa1fc85635cbcf4cf22 > "$RUNNER_TEMP/browser-fixtures/fixture-commit.txt"
+          (cd "$RUNNER_TEMP/browser-fixtures" && sha256sum BrowserFixtures.apk > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: original-browser-update-fixtures-002
+          path: ${{ runner.temp }}/browser-fixtures/*
+          retention-days: 1
+      - name: Clean signing material
+        if: always()
+        run: rm -f source/my-release-key.keystore
