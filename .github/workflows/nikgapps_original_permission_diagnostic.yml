@@ -4,7 +4,7 @@ on:
     inputs:
       variant:
         type: choice
-        options: [removed, present]
+        options: [removed, present, usable]
         default: removed
         required: true
 permissions:
@@ -41,15 +41,19 @@ jobs:
           python3 - <<'PY'
           import os
           from pathlib import Path
-          variant=os.environ['VARIANT'];assert variant in ('removed','present')
+          variant=os.environ['VARIANT'];assert variant in ('removed','present','usable')
           p=Path('app/src/main/AndroidManifest.xml');s=p.read_text()
           line='    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n'
           assert s.count(line)==1
-          if variant=='removed':p.write_text(s.replace(line,''))
+          if variant in ('removed','usable'):p.write_text(s.replace(line,''))
+          if variant=='usable':
+              p=Path('app/src/main/java/com/nikgapps/app/utils/constants/PermissionConstants.kt');s=p.read_text()
+              start=s.index('            put(INSTALL_APPS, PermissionInfo(');end=s.index('            ))',start)+len('            ))')
+              p.write_text(s[:start]+s[end:])
           p=Path('app/build.gradle.kts');s=p.read_text().replace('versionCode = 1','versionCode = 82').replace('versionName = "1.0"','versionName = "0.82"');p.write_text(s)
           PY
           mkdir ../evidence
-          git diff -- app/src/main/AndroidManifest.xml app/build.gradle.kts > ../evidence/build.patch
+          git diff -- app/src/main/AndroidManifest.xml app/build.gradle.kts app/src/main/java/com/nikgapps/app/utils/constants/PermissionConstants.kt > ../evidence/build.patch
           git rev-parse HEAD > ../evidence/original-source-commit.txt
           chmod +x gradlew
       - name: Prepare production signing
