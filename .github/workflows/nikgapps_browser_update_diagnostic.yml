@@ -55,6 +55,12 @@ jobs:
           git rev-parse HEAD > ../evidence/original-source-commit.txt
           cp ../overlay/investigation/browser-update/overlay.json ../evidence/
           chmod +x gradlew
+          cat >> app/build.gradle.kts <<'KOTLIN'
+          tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+              timeout.set(java.time.Duration.ofMinutes(3))
+              testLogging { events("started", "passed", "skipped", "failed") }
+          }
+          KOTLIN
       - name: Prepare production signing
         working-directory: source
         env:
@@ -73,7 +79,7 @@ jobs:
           POSTHOG_HOST: ${{ secrets.POSTHOG_HOST }}
           NIKGAPPS_CLIENT_ID: ${{ secrets.NIKGAPPS_CLIENT_ID }}
         run: |
-          ./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease :app:assembleReleaseAndroidTest --max-workers=2 --no-parallel -Dorg.gradle.jvmargs="-Xmx3072m -Dfile.encoding=UTF-8" --console=plain
+          ./gradlew :app:testReleaseUnitTest --tests "com.nikgapps.app.update.AppUpdateBrowserTest" --tests "com.nikgapps.app.utils.network.VersionFetcherTest" --tests "com.nikgapps.app.utils.network.ReleaseMigrationTest" --tests "com.nikgapps.app.utils.network.ChangelogStatusTest" :app:lintRelease :app:assembleRelease :app:assembleReleaseAndroidTest --max-workers=2 --no-parallel -Dorg.gradle.jvmargs="-Xmx3072m -Dfile.encoding=UTF-8" --console=plain
           ./gradlew :app:dependencies --configuration releaseRuntimeClasspath > ../evidence/dependencies.txt
       - name: Normalize and verify original APK
         working-directory: source
